@@ -355,7 +355,7 @@ private fun AdminPanel(
         }
         if (view == "users" && info != null) {
             HorizontalDivider()
-            UserForm(busy, send)
+            UserForm(busy, send, info.optJSONArray("users"))
         }
         Text("برای دیدن نتیجه تغییرات، دکمه به‌روزرسانی را دوباره بزنید.",
             color = muted, fontSize = 12.sp)
@@ -425,28 +425,107 @@ private fun AdminRow(type: String, item: JSONObject, busy: Boolean,
 }
 
 @Composable
-private fun UserForm(busy: Boolean, send: (String, JSONObject, Boolean) -> Unit) {
-    var login by remember { mutableStateOf("") }
-    var name by remember { mutableStateOf("") }
+private fun UserForm(
+    busy: Boolean,
+    send: (String, JSONObject, Boolean) -> Unit,
+    users: JSONArray?
+) {
+    var originalUsername by remember { mutableStateOf("") }
+    var username by remember { mutableStateOf("") }
+    var fullName by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var active by remember { mutableStateOf(true) }
-    Text("ایجاد یا ویرایش ویزیتور", color = navy, fontWeight = FontWeight.Bold)
-    Text("برای ویرایش کاربر موجود، همان نام کاربری را وارد کنید.",
-        color = muted, fontSize = 12.sp)
-    Field("نام کاربری انگلیسی", login, { login = it })
-    Field("نام و نام خانوادگی", name, { name = it })
-    OutlinedTextField(value = password, onValueChange = { password = it },
-        label = { Text("رمز عبور (برای کاربر جدید الزامی)") },
+
+    Text("مدیریت حساب ویزیتورها", color = navy, fontWeight = FontWeight.Bold)
+    Text(
+        "برای تغییر نام کاربری، ابتدا حساب ویزیتور را از فهرست زیر انتخاب کنید.",
+        color = muted, fontSize = 12.sp
+    )
+    val visitorAccounts = remember(users) {
+        (0 until (users?.length() ?: 0))
+            .mapNotNull { users?.optJSONObject(it) }
+            .filter { it.optString("role") == "visitor" }
+    }
+    if (visitorAccounts.isEmpty()) {
+        Text("ابتدا اطلاعات کاربران را به‌روزرسانی کنید.",
+            color = muted, fontSize = 12.sp)
+    }
+    visitorAccounts.chunked(2).forEach { entries ->
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+            entries.forEach { u ->
+                val login = u.optString("username")
+                val label = u.optString("name", login)
+                FilterChip(
+                    selected = originalUsername == login,
+                    onClick = {
+                        originalUsername = login
+                        username = login
+                        fullName = label
+                        active = u.optBoolean("active", true)
+                        password = ""
+                    },
+                    label = { Text(label, fontSize = 12.sp) }
+                )
+            }
+        }
+    }
+    OutlinedButton(
+        onClick = {
+            originalUsername = ""
+            username = ""
+            fullName = ""
+            password = ""
+            active = true
+        },
+        enabled = !busy
+    ) { Text("ایجاد ویزیتور جدید") }
+
+    if (originalUsername.isNotBlank()) {
+        Text("در حال ویرایش حساب: $originalUsername",
+            color = navy, fontWeight = FontWeight.Medium)
+    }
+    Field("نام کاربری جدید (انگلیسی)", username, { username = it })
+    Field("نام و نام خانوادگی", fullName, { fullName = it })
+    OutlinedTextField(
+        value = password, onValueChange = { password = it },
+        label = { Text(if (originalUsername.isNotBlank())
+            "رمز جدید (خالی = حفظ رمز قبلی)" else "رمز عبور (حداقل ۸ کاراکتر)") },
         visualTransformation = PasswordVisualTransformation(),
-        modifier = Modifier.fillMaxWidth())
+        modifier = Modifier.fillMaxWidth(),
+        singleLine = true
+    )
     Row(verticalAlignment = Alignment.CenterVertically) {
         Checkbox(checked = active, onCheckedChange = { active = it })
-        Text("حساب فعال", color = navy)
+        Text("حساب فعال باشد", color = navy)
     }
-    Button(onClick = {
-        send("adminSaveVisitor", JSONObject().put("username", login.trim())
-            .put("name", name.trim()).put("password", password)
-            .put("active", active), false)
-    }, enabled = !busy && login.isNotBlank() && name.isNotBlank(),
-        modifier = Modifier.fillMaxWidth()) { Text("ذخیره ویزیتور") }
+    val validUsername = Regex("^[a-zA-Z0-9_.-]{2,40}$").matches(username.trim())
+    val validPassword = if (originalUsername.isNotBlank())
+        password.isEmpty() || password.length >= 8 else password.length >= 8
+    Button(
+        onClick = {
+            val payload = JSONObject()
+                .put("username", username.trim())
+                .put("name", fullName.trim())
+                .put("password", password)
+                .put("active", active)
+            if (originalUsername.isNotBlank()) {
+                payload.put("oldUsername", originalUsername)
+                // The old API never recognizes this action, preventing accidental
+                // creation of duplicate users before the server is upgraded.
+                send("adminRenameVisitor", payload, false)
+            } else {
+                send("adminSaveVisitor", payload, false)
+            }
+        },
+        enabled = !busy && validUsername && fullName.isNotBlank() && validPassword,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Text(if (originalUsername.isNotBlank()) "ذخیره تغییرات ویزیتور"
+        else "ساخت حساب جدید")
+    }
+    Text(
+        "پس از تغییر نام کاربری، ویزیتور باید خارج شود و با نام کاربری جدید دوباره وارد شود. " +
+        "رمز قبلی حفظ می‌شود مگر اینکه رمز جدید ثبت کنید.",
+        color = muted, fontSize = 12.sp
+    )
 }
