@@ -16,6 +16,8 @@ import androidx.compose.material.icons.filled.Login
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.Fingerprint
+import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -48,10 +50,21 @@ private val fieldGrey = Color(0xFF677181)
 fun NativeLoginScreen(
     busy: Boolean,
     message: String?,
-    onLogin: (String, String) -> Unit
+    savedUsername: String,
+    rememberName: Boolean,
+    canUseBiometrics: Boolean,
+    hasBiometricLogin: Boolean,
+    biometricUsername: String,
+    onLogin: (String, String, Boolean, Boolean) -> Unit,
+    onBiometricLogin: () -> Unit,
+    onForgetLogin: () -> Unit
 ) {
-    var username by remember { mutableStateOf("") }
+    var username by remember(savedUsername) { mutableStateOf(savedUsername) }
     var password by remember { mutableStateOf("") }
+    var saveName by remember(rememberName) { mutableStateOf(rememberName) }
+    var enableBiometric by remember(hasBiometricLogin, canUseBiometrics) {
+        mutableStateOf(hasBiometricLogin && canUseBiometrics)
+    }
     var revealPassword by remember { mutableStateOf(false) }
     val canLogin = !busy && username.isNotBlank() && password.isNotBlank()
     BoxWithConstraints(
@@ -192,7 +205,47 @@ fun NativeLoginScreen(
                             ),
                             modifier = Modifier.fillMaxWidth()
                         )
-                        Spacer(Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Checkbox(
+                                checked = saveName,
+                                onCheckedChange = { saveName = it },
+                                colors = CheckboxDefaults.colors(checkedColor = deepNavy)
+                            )
+                            Text("ذخیره نام کاربری روی این گوشی",
+                                color = midnight, fontSize = 13.sp)
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Checkbox(
+                                checked = enableBiometric,
+                                enabled = canUseBiometrics && !busy,
+                                onCheckedChange = {
+                                    enableBiometric = it
+                                    if (it) saveName = true
+                                },
+                                colors = CheckboxDefaults.colors(checkedColor = deepNavy)
+                            )
+                            Text("ذخیره رمز و ورود با اثر انگشت",
+                                color = if (canUseBiometrics) midnight else fieldGrey,
+                                fontSize = 13.sp)
+                        }
+                        if (!canUseBiometrics) {
+                            Text(
+                                "برای فعال‌سازی این گزینه، ابتدا اثر انگشت ایمن را در تنظیمات قفل گوشی ثبت کنید.",
+                                color = fieldGrey, fontSize = 11.sp
+                            )
+                        } else if (enableBiometric && !hasBiometricLogin) {
+                            Text(
+                                "پس از یک ورود موفق با رمز، اثر انگشت را تأیید کنید تا رمز به‌صورت امن ذخیره شود.",
+                                color = fieldGrey, fontSize = 11.sp
+                            )
+                        }
+                        Spacer(Modifier.height(2.dp))
                         Box(
                             modifier = Modifier.fillMaxWidth().height(57.dp)
                                 .shadow(6.dp, RoundedCornerShape(20.dp))
@@ -200,7 +253,9 @@ fun NativeLoginScreen(
                                 .background(Brush.horizontalGradient(
                                     listOf(Color(0xFFD59B31), lightGold, Color(0xFFD8A033))
                                 ))
-                                .clickable(enabled = canLogin) { onLogin(username.trim(), password) },
+                                .clickable(enabled = canLogin) {
+                                    onLogin(username.trim(), password, saveName, enableBiometric)
+                                },
                             contentAlignment = Alignment.Center
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -216,6 +271,38 @@ fun NativeLoginScreen(
                                 Text(if (busy) "در حال ورود..." else "ورود به برنامه",
                                     color = midnight, fontSize = 18.sp,
                                     fontWeight = FontWeight.ExtraBold)
+                            }
+                        }
+                        if (hasBiometricLogin && canUseBiometrics) {
+                            OutlinedButton(
+                                onClick = onBiometricLogin,
+                                enabled = !busy,
+                                modifier = Modifier.fillMaxWidth().height(52.dp),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, warmGold),
+                                shape = RoundedCornerShape(17.dp)
+                            ) {
+                                Icon(Icons.Filled.Fingerprint, contentDescription = null,
+                                    tint = midnight, modifier = Modifier.size(26.dp))
+                                Spacer(Modifier.width(9.dp))
+                                Text("ورود با اثر انگشت", color = midnight,
+                                    fontWeight = FontWeight.Bold)
+                            }
+                            Text("حساب ذخیره‌شده: $biometricUsername",
+                                color = fieldGrey, fontSize = 11.sp,
+                                modifier = Modifier.fillMaxWidth(),
+                                textAlign = TextAlign.Center)
+                        }
+                        if (hasBiometricLogin || savedUsername.isNotBlank()) {
+                            TextButton(
+                                onClick = onForgetLogin,
+                                enabled = !busy,
+                                modifier = Modifier.align(Alignment.CenterHorizontally)
+                            ) {
+                                Icon(Icons.Filled.DeleteOutline, contentDescription = null,
+                                    tint = fieldGrey, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(5.dp))
+                                Text("حذف اطلاعات ورود ذخیره‌شده",
+                                    fontSize = 11.sp, color = fieldGrey)
                             }
                         }
                         if (message != null) {
