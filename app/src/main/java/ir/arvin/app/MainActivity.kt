@@ -7,6 +7,7 @@ import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Bundle
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.graphics.Color as AndroidColor
@@ -46,6 +47,7 @@ class MainActivity : FragmentActivity() {
     private var loginBusy by mutableStateOf(false)
     private var loginMessage by mutableStateOf<String?>(null)
     private var pendingLocation: ((JSONObject?, String?) -> Unit)? = null
+    private var pendingRoutePermission: ((Boolean) -> Unit)? = null
     private lateinit var vault: ArvinBiometricVault
     private var savedLoginName by mutableStateOf("")
     private var rememberName by mutableStateOf(false)
@@ -62,6 +64,13 @@ class MainActivity : FragmentActivity() {
         } else {
             callback?.invoke(null, "برای ثبت حضور، مسیر و گزارش، اجازه دسترسی به موقعیت مکانی لازم است.")
         }
+    }
+
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        pendingRoutePermission?.invoke(granted)
+        pendingRoutePermission = null
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -220,6 +229,10 @@ class MainActivity : FragmentActivity() {
         requireGps: Boolean,
         callback: (JSONObject) -> Unit
     ) {
+        if (action == "visitorRoute" && userRole == "visitor") {
+            routeRequest(data, callback)
+            return
+        }
         val token = currentToken
         if (token.isNullOrBlank()) {
             callback(JSONObject().put("ok", false).put("message", "نشست تمام شده؛ دوباره وارد شوید."))
@@ -245,6 +258,86 @@ class MainActivity : FragmentActivity() {
         } else {
             send(data)
         }
+    }
+
+    private fun routeRequest(data: JSONObject, callback: (JSONObject) -> Unit) {
+        val mode = data.optString("action")
+        if (mode == "پایان مسیر") {
+            if (!ArvinRouteTrackingService.isActive(this)) {
+                callback(JSONObject().put("ok", false).put("message",
+                    "مسیر فعالی روی این گوشی پیدا نشد."))
+            } else {
+                try {
+                    ArvinRouteTrackingService.stop(this)
+                    callback(JSONObject().put("ok", true).put("message",
+                        "GPS متوقف شد. ارسال پایان مسیر و نقاط باقیمانده در حال انجام است."))
+                } catch (_: Exception) {
+                    callback(JSONObject().put("ok", false).put("message",
+                        "توقف خودکار ممکن نشد؛ از اعلان ردیابی استفاده کنید."))
+                }
+            }
+            return
+        }
+        if (mode != "شروع مسیر") {
+            callback(JSONObject().put("ok",false).put("message","دستور مسیر نامعتبر است."))
+            return
+        }
+        if (ArvinRouteTrackingService.isActive(this)) {
+            callback(JSONObject().put("ok",false).put("message",
+                "مسیر از قبل فعال است. ابتدا مسیر قبلی را پایان دهید."))
+            return
+        }
+        val token = currentToken
+        if (token.isNullOrBlank()) {
+            callback(JSONObject().put("ok",false).put("message",
+                "برای شروع مسیر دوباره وارد حساب شوید."))
+            return
+        }
+        val launch = {
+            fetchLocation { location, error ->
+                if (location == null) {
+                    callback(JSONObject().put("ok",false).put("message",
+                        error ?: "موقعیت GPS دریافت نشد."))
+                } else {
+                    postJson(JSONObject().put("action", "trackingStart")
+                        .put("token", token)
+                        .put("data", JSONObject().put("location",location))) { response ->
+                        if (!response.optBoolean("ok")) {
+                            callback(response)
+                        } else {
+                            val id = response.optString("sessionId")
+                            val secret = response.optString("trackingToken")
+                            if (id.isBlank() || secret.isBlank()) {
+                                callback(JSONObject().put("ok",false)
+                                    .put("message","پاسخ شروع مسیر ناقص بود."))
+                            } else {
+                                try {
+                                    ArvinRouteTrackingService.start(this,id,secret)
+                                    callback(JSONObject().put("ok",true).put("message",
+                                        "ردیابی مسیر شروع شد. هنگام فعال بودن، اعلان GPS نمایش داده می‌شود."))
+                                } catch (_: Exception) {
+                                    postJson(JSONObject().put("action","trackingStop")
+                                        .put("data",JSONObject().put("sessionId",id)
+                                            .put("trackingToken",secret))) {}
+                                    callback(JSONObject().put("ok",false)
+                                        .put("message","Android اجازه شروع ردیابی را نداد. مجوز GPS و اعلان را بررسی کنید."))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
+                PackageManager.PERMISSION_GRANTED) {
+            pendingRoutePermission = { granted ->
+                if (granted) launch()
+                else callback(JSONObject().put("ok",false).put("message",
+                    "برای نمایش اعلان دائمی GPS، اجازه اعلان‌ها را فعال کنید."))
+            }
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else launch()
     }
 
     private fun hasLocationPermission(): Boolean =
@@ -311,6 +404,10 @@ class MainActivity : FragmentActivity() {
     }
 
     private fun logoutNative() {
+        // Logging out must never leave covert location tracking running.
+        if (ArvinRouteTrackingService.isActive(this)) {
+            try { ArvinRouteTrackingService.stop(this) } catch (_: Exception) {}
+        }
         val token = currentToken
         currentToken = null
         displayName = null
