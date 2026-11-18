@@ -43,6 +43,9 @@ fun ArvinNativeDashboard(
     var resultMessage by remember { mutableStateOf<String?>(null) }
     var resultOk by remember { mutableStateOf(true) }
     var adminData by remember { mutableStateOf<JSONObject?>(null) }
+    // Session-only history: updated only after server confirms successful save.
+    var lastAttendance by remember { mutableStateOf<String?>(null) }
+    var lastRoute by remember { mutableStateOf<String?>(null) }
     val pages: List<Pair<String, ImageVector>> = when (role) {
         "admin" -> listOf("خانه" to Icons.Filled.Home, "حضور" to Icons.Filled.AccessTime,
             "مدیریت" to Icons.Filled.Dashboard, "خروج ساعتی" to Icons.Filled.EventNote)
@@ -63,40 +66,23 @@ fun ArvinNativeDashboard(
                 if (action == "adminLoad" && resultOk) {
                     adminData = result
                     resultMessage = "اطلاعات واقعی دریافت شد."
-                } else resultMessage = result.optString("message", "عملیات انجام شد.")
+                } else {
+                    if (resultOk && action == "attendance") lastAttendance = data.optString("action")
+                    if (resultOk && action == "visitorRoute") lastRoute = data.optString("action")
+                    resultMessage = result.optString("message",
+                        if (resultOk) "عملیات با موفقیت ثبت شد." else "درخواست انجام نشد.")
+                }
             }
         }
     }
 
     Scaffold(
-        containerColor = bg,
-        topBar = {
-            Column(Modifier.fillMaxWidth().background(navy).padding(16.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("پخش آروین", color = Color.White,
-                            fontWeight = FontWeight.Bold, fontSize = 24.sp)
-                        Text("پخش مواد غذایی، بهداشتی و شوینده",
-                            color = Color(0xFFDCE7F1), fontSize = 11.sp)
-                    }
-                    TextButton(onClick = onLogout) { Text("خروج", color = Color.White) }
-                }
-                Text("خوش آمدید، $name", color = Color(0xFFF7DEB5), fontSize = 13.sp)
-            }
-        },
+        containerColor = Color(0xFFFCF9F4),
+        topBar = { ModernArvinHeader(name, role, onLogout) },
         bottomBar = {
-            NavigationBar(containerColor = Color.White) {
-                pages.forEach { (title, icon) ->
-                    NavigationBarItem(
-                        selected = tab == title, onClick = { tab = title; resultMessage = null },
-                        icon = { Icon(icon, contentDescription = title) },
-                        label = { Text(title, fontSize = 10.sp) },
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = navy, selectedTextColor = navy,
-                            indicatorColor = Color(0xFFF4EADC)
-                        )
-                    )
-                }
+            ModernArvinBottomBar(pages, tab) { selected ->
+                tab = selected
+                resultMessage = null
             }
         }
     ) { inset ->
@@ -114,9 +100,14 @@ fun ArvinNativeDashboard(
                 }
             }
             when (tab) {
-                "خانه" -> HomePanel(role, username, onNavigate = { tab = it })
-                "حضور" -> AttendancePanel(busy, send)
-                "مسیر" -> RoutePanel(busy, send)
+                "خانه" -> ModernHome(
+                    name, role, username,
+                    onNavigate = { tab = it },
+                    onRefresh = { send("adminLoad", JSONObject(), false) },
+                    adminData = adminData
+                )
+                "حضور" -> ModernAttendance(busy, role, send, lastAttendance, lastRoute)
+                "مسیر" -> ModernRoute(busy, send, lastRoute)
                 "گزارش" -> VisitorReportPanel(busy, send)
                 "خروج ساعتی" -> LeavePanel(busy, send)
                 "مدیریت" -> AdminPanel(adminData, busy, send)
@@ -127,8 +118,9 @@ fun ArvinNativeDashboard(
 
 @Composable
 private fun PanelTitle(title: String, hint: String) {
-    Text(title, color = navy, fontWeight = FontWeight.Bold, fontSize = 21.sp)
-    Text(hint, color = muted, fontSize = 12.sp)
+    ModernSectionHeader(title, hint,
+        if (title.contains("گزارش")) Icons.Filled.Assignment
+        else Icons.Filled.EventNote)
 }
 
 @Composable
@@ -238,6 +230,13 @@ private fun Field(label: String, value: String, onValue: (String) -> Unit,
     OutlinedTextField(
         modifier = Modifier.fillMaxWidth(), value = value, onValueChange = onValue,
         label = { Text(label) }, singleLine = true,
+        shape = RoundedCornerShape(14.dp),
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedBorderColor = gold,
+            unfocusedBorderColor = Color(0xFFADB7C2),
+            focusedContainerColor = Color.White,
+            unfocusedContainerColor = Color.White
+        ),
         keyboardOptions = KeyboardOptions(keyboardType =
             if (number) KeyboardType.Decimal else KeyboardType.Text)
     )
@@ -314,9 +313,10 @@ private fun AdminPanel(
     send: (String, JSONObject, Boolean) -> Unit
 ) {
     var view by remember { mutableStateOf("leaveRequests") }
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        PanelTitle("پنل خصوصی مدیر", "آمار و اطلاعات واقعی کارکنان")
+    Column(Modifier.fillMaxSize().background(Color(0xFFFCF9F4))
+        .verticalScroll(rememberScrollState()).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        ModernManagerSummary(info)
         Button(onClick = { send("adminLoad", JSONObject(), false) },
             enabled = !busy, modifier = Modifier.fillMaxWidth()) {
             Text("دریافت و به‌روزرسانی اطلاعات")
@@ -325,14 +325,8 @@ private fun AdminPanel(
             Text("برای مشاهده گزارش‌ها و درخواست‌ها، اطلاعات را دریافت کنید.",
                 color = muted)
         } else {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                CountCard("گزارش", info.optJSONArray("reports")?.length() ?: 0, Modifier.weight(1f))
-                CountCard("حضور", info.optJSONArray("attendance")?.length() ?: 0, Modifier.weight(1f))
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                CountCard("مسیرها", info.optJSONArray("routes")?.length() ?: 0, Modifier.weight(1f))
-                CountCard("درخواست‌ها", info.optJSONArray("leaveRequests")?.length() ?: 0, Modifier.weight(1f))
-            }
+            Text("بخش موردنظر را انتخاب کنید", color = navy,
+                fontWeight = FontWeight.Bold, fontSize = 16.sp)
             listOf(
                 listOf("leaveRequests" to "درخواست‌ها", "attendance" to "حضور", "routes" to "مسیر"),
                 listOf("reports" to "فروش", "users" to "کاربران")
@@ -340,6 +334,14 @@ private fun AdminPanel(
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     chips.forEach { (key, label) ->
                         FilterChip(selected = view == key, onClick = { view = key },
+                            shape = RoundedCornerShape(15.dp),
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp, if (view == key) Color(0xFFE8B64B) else Color(0xFFDED5C6)),
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = Color(0xFFFFE6A6),
+                                containerColor = Color.White,
+                                selectedLabelColor = navy
+                            ),
                             label = { Text(label) })
                     }
                 }
@@ -402,7 +404,13 @@ private fun AdminRow(type: String, item: JSONObject, busy: Boolean,
             details = if (item.optBoolean("active")) "فعال" else "غیرفعال"
         }
     }
-    Card(colors = CardDefaults.cardColors(containerColor = Color.White)) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFF0D9AC)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White)
+    ) {
         Column(Modifier.fillMaxWidth().padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(7.dp)) {
             Text(heading, color = navy, fontWeight = FontWeight.Bold, fontSize = 14.sp)
