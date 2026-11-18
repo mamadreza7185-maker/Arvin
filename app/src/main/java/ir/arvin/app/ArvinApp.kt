@@ -49,7 +49,7 @@ fun ArvinApp(
     val context = LocalContext.current
     var webMountedOnce by remember { mutableStateOf(false) }
     val openInChrome = {
-        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(webView.url ?: "https://script.google.com/macros/s/AKfycbwAU8DUulyp17fRUnmZFIIJ_IoYJhWqZ14lmrpdVSYoq-GFFAzFaNLthXBHjOQwb9US/exec")))
+        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://script.google.com/macros/s/AKfycbwAU8DUulyp17fRUnmZFIIJ_IoYJhWqZ14lmrpdVSYoq-GFFAzFaNLthXBHjOQwb9US/exec")))
     }
     BackHandler(enabled = tab != Tab.HOME || (tab == Tab.SERVICES && webView.canGoBack())) {
         if (tab == Tab.SERVICES && webView.canGoBack()) webView.goBack()
