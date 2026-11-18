@@ -7,6 +7,8 @@
     <application
         android:allowBackup="false"
         android:label="پخش آروین"
+        android:icon="@drawable/ic_arvin_logo"
+        android:roundIcon="@drawable/ic_arvin_logo"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.Light.NoActionBar"
         android:usesCleartextTraffic="false">
