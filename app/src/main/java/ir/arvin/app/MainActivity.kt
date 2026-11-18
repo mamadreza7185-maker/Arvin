@@ -62,7 +62,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.statusBarColor = AndroidColor.rgb(18, 36, 62)
-        window.navigationBarColor = AndroidColor.WHITE
+        window.navigationBarColor = AndroidColor.rgb(18, 36, 62)
         setContent {
             MaterialTheme(colorScheme = lightColorScheme(
                 primary = Color(0xFF12243E),
@@ -264,46 +264,3 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@Composable
-private fun NativeLoginScreen(
-    busy: Boolean,
-    message: String?,
-    onLogin: (String, String) -> Unit
-) {
-    var username by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
-    Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text("پخش آروین", fontSize = 30.sp, fontWeight = FontWeight.Bold,
-            color = Color(0xFF12243E))
-        Spacer(Modifier.height(8.dp))
-        Text("سامانه حضور و غیاب و مدیریت کارکنان", color = Color(0xFF64748B))
-        Spacer(Modifier.height(28.dp))
-        OutlinedTextField(value = username, onValueChange = { username = it },
-            label = { Text("نام کاربری") }, singleLine = true,
-            modifier = Modifier.fillMaxWidth())
-        Spacer(Modifier.height(12.dp))
-        OutlinedTextField(value = password, onValueChange = { password = it },
-            label = { Text("رمز عبور") }, singleLine = true,
-            visualTransformation = PasswordVisualTransformation(),
-            modifier = Modifier.fillMaxWidth())
-        Spacer(Modifier.height(20.dp))
-        Button(
-            onClick = { onLogin(username, password) },
-            enabled = !busy && username.isNotBlank() && password.isNotBlank(),
-            modifier = Modifier.fillMaxWidth().height(50.dp)
-        ) {
-            Text(if (busy) "در حال ورود..." else "ورود به برنامه")
-        }
-        if (message != null) {
-            Spacer(Modifier.height(14.dp))
-            Text(message, color = Color(0xFFB42318))
-        }
-        Spacer(Modifier.height(20.dp))
-        Text("نسخه بومی اندروید • پخش مواد غذایی، بهداشتی و شوینده",
-            color = Color(0xFF64748B), fontSize = 11.sp)
-    }
-}
