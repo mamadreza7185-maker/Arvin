@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Navy backing matches the official Arvin identity. -->
+    <path android:fillColor="#0C1931"
+        android:pathData="M0,0 L108,0 L108,108 L0,108 Z"/>
+    <path android:fillColor="#1A3150"
+        android:pathData="M6,6 L102,6 L102,102 L6,102 Z"/>
+    <!-- Gold orbital ribbon behind the metallic A. -->
+    <path android:strokeColor="#845A17" android:strokeWidth="4.8"
+        android:strokeLineCap="round"
+        android:pathData="M15,66 C24,45 56,30 79,39 C87,42 94,47 96,53"/>
+    <path android:strokeColor="#F2C157" android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:pathData="M14,63 C29,40 63,34 82,42 C88,44 92,49 95,53"/>
+    <!-- Dimensional A: gold left pillar, silver body. -->
+    <path android:fillColor="#926018"
+        android:pathData="M46,16 L62,16 L89,89 L72,89 L55,42 L37,89 L20,89 Z"/>
+    <path android:fillColor="#F0F3F8"
+        android:pathData="M51,15 L63,15 L89,86 L75,86 L57,38 L39,86 L26,86 Z"/>
+    <path android:fillColor="#E3AB38"
+        android:pathData="M46,16 L54,16 L29,86 L20,86 Z"/>
+    <path android:fillColor="#CFD5DE"
+        android:pathData="M57,38 L63,54 L55,54 L52,63 L70,63 L75,76 L47,76 Z"/>
+    <path android:fillColor="#13233C"
+        android:pathData="M52,61 L61,61 L58,53 Z"/>
+    <!-- Crossbar and gold leading edge. -->
+    <path android:fillColor="#F0B843"
+        android:pathData="M41,66 L74,66 L78,76 L37,76 Z"/>
+    <path android:fillColor="#FFE7A0"
+        android:pathData="M42,66 L73,66 L74,69 L41,69 Z"/>
+    <!-- Foreground swoosh: emblem's defining gold ring. -->
+    <path android:strokeColor="#94651E" android:strokeWidth="8.5"
+        android:strokeLineCap="round"
+        android:pathData="M18,72 C32,48 68,42 94,50"/>
+    <path android:strokeColor="#E7B143" android:strokeWidth="5.5"
+        android:strokeLineCap="round"
+        android:pathData="M18,68 C34,46 69,42 94,50"/>
+    <path android:strokeColor="#FFE39A" android:strokeWidth="1.5"
+        android:strokeLineCap="round"
+        android:pathData="M21,65 C38,46 69,43 92,50"/>
+    <path android:fillColor="#F0BA4B"
+        android:pathData="M48,91 C42,85 39,79 42,76 C49,77 53,84 48,91 Z"/>
+    <path android:fillColor="#E7B24A"
+        android:pathData="M53,90 C53,83 58,77 65,75 C65,83 60,88 53,90 Z"/>
+</vector>
