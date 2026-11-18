@@ -13,6 +13,7 @@ import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.webkit.CookieManager
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -67,10 +68,13 @@ class MainActivity : ComponentActivity() {
         window.statusBarColor = android.graphics.Color.rgb(18, 34, 61)
         window.navigationBarColor = android.graphics.Color.WHITE
 
+        CookieManager.getInstance().setAcceptCookie(true)
         webView = WebView(this).apply {
+            CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             settings.databaseEnabled = true
+            settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
             settings.setGeolocationEnabled(true)
             settings.allowFileAccess = false
             settings.allowContentAccess = false
