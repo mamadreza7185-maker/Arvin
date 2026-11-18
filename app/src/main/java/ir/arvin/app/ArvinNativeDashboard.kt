@@ -48,7 +48,8 @@ fun ArvinNativeDashboard(
     var lastRoute by remember { mutableStateOf<String?>(null) }
     val pages: List<Pair<String, ImageVector>> = when (role) {
         "admin" -> listOf("خانه" to Icons.Filled.Home, "حضور" to Icons.Filled.AccessTime,
-            "مدیریت" to Icons.Filled.Dashboard, "خروج ساعتی" to Icons.Filled.EventNote)
+            "مدیریت" to Icons.Filled.Dashboard, "ردیابی" to Icons.Filled.Route,
+            "خروج ساعتی" to Icons.Filled.EventNote)
         "visitor" -> listOf("خانه" to Icons.Filled.Home, "حضور" to Icons.Filled.AccessTime,
             "مسیر" to Icons.Filled.LocationOn, "گزارش" to Icons.Filled.Assessment,
             "خروج ساعتی" to Icons.Filled.EventNote)
@@ -111,6 +112,7 @@ fun ArvinNativeDashboard(
                 "گزارش" -> VisitorReportPanel(busy, send)
                 "خروج ساعتی" -> LeavePanel(busy, send)
                 "مدیریت" -> AdminPanel(adminData, busy, send)
+                "ردیابی" -> ArvinTrackingManager(onRequest)
             }
         }
     }
