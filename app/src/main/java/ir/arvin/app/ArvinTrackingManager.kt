@@ -37,6 +37,8 @@ private val trackingMuted = Color(0xFF64748B)
 private val trackingBg = Color(0xFFFCF9F4)
 private val tehran = TimeZone.getTimeZone("Asia/Tehran")
 
+private data class VisitorItem(val username: String, val name: String, val active: Boolean)
+
 private data class TrackingSessionItem(
     val id: String,
     val username: String,
@@ -70,6 +72,9 @@ fun ArvinTrackingManager(
             .apply { timeZone = tehran }.format(Date()))
     }
     var sessions by remember { mutableStateOf<List<TrackingSessionItem>>(emptyList()) }
+    var visitors by remember { mutableStateOf<List<VisitorItem>>(emptyList()) }
+    var visitorLoaded by remember { mutableStateOf(false) }
+    var visitorsError by remember { mutableStateOf<String?>(null) }
     var selectedId by remember { mutableStateOf("") }
     var points by remember { mutableStateOf(JSONArray()) }
     var loading by remember { mutableStateOf(false) }
@@ -85,10 +90,33 @@ fun ArvinTrackingManager(
     LaunchedEffect(day, refreshTick) {
         serverConnected = null
         summaryError = null
+        visitorsError = null
+        visitorLoaded = false
         sessions = emptyList()
         selectedId = ""
         points = JSONArray()
         while (true) {
+            // The visitor roster is independent of GPS: show all visitor
+            // accounts even if no route has ever been started.
+            onRequest("adminLoad", JSONObject(), false) { response ->
+                visitorLoaded = true
+                if (response.optBoolean("ok")) {
+                    val users = response.optJSONArray("users") ?: JSONArray()
+                    visitors = (0 until users.length()).mapNotNull { i ->
+                        val item = users.optJSONObject(i) ?: return@mapNotNull null
+                        val kind = item.optString("role").trim().lowercase(Locale.ROOT)
+                        if (kind != "visitor" && kind != "ویزیتور") return@mapNotNull null
+                        val login = item.optString("username").trim()
+                        if (login.isBlank()) return@mapNotNull null
+                        VisitorItem(login, item.optString("name",login),
+                            item.optBoolean("active",true))
+                    }.distinctBy { it.username.lowercase(Locale.ROOT) }
+                    visitorsError = null
+                } else {
+                    visitorsError = "فهرست کاربران دریافت نشد: " +
+                        response.optString("message", "خطای ارتباط با سرور")
+                }
+            }
             loading = true
             onRequest("trackingSummary", JSONObject().put("date", day), false) { result ->
                 loading = false
@@ -237,6 +265,78 @@ fun ArvinTrackingManager(
             if (summaryError != null) {
                 Text(summaryError.orEmpty(), color = Color(0xFFB42318),
                     fontSize = 12.sp)
+            }
+        }
+        ModernPanel {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.Groups, contentDescription = null,
+                    tint = trackingGold, modifier = Modifier.size(26.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("فهرست همه ویزیتورها", color = trackingNavy,
+                    fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
+            }
+            Text("این فهرست از حساب‌های ثبت‌شده در پنل مدیر دریافت می‌شود؛ برای نمایش نام ویزیتور نیازی به شروع مسیر نیست.",
+                color = trackingMuted, fontSize = 11.sp)
+            if (!visitorLoaded) {
+                Text("در حال دریافت نام ویزیتورها...",
+                    color = trackingMuted, fontSize = 12.sp)
+            } else if (visitorsError != null) {
+                Text(visitorsError.orEmpty(),
+                    color = Color(0xFFB42318), fontSize = 12.sp)
+            } else if (visitors.isEmpty()) {
+                Text("هیچ حسابی با نقش «visitor» در فهرست کاربران پیدا نشد. نقش کاربران را در مدیریت بررسی کنید.",
+                    color = Color(0xFFAA7624), fontSize = 12.sp)
+            }
+            visitors.forEach { visitor ->
+                val todayRoutes = sessions.filter {
+                    it.username.equals(visitor.username, ignoreCase = true)
+                }
+                val currentRoute = todayRoutes.firstOrNull { it.status == "فعال" }
+                    ?: todayRoutes.firstOrNull()
+                val state = when {
+                    currentRoute == null -> "هنوز مسیر GPS برای این تاریخ ثبت نشده"
+                    currentRoute.status == "فعال" -> "در حال ردیابی GPS"
+                    else -> "وضعیت مسیر: " + currentRoute.status
+                }
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                    color = Color(0xFFFBFBFC),
+                    border = BorderStroke(1.dp, Color(0xFFEDE3D3))
+                ) {
+                    Row(Modifier.fillMaxWidth().padding(10.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Filled.PersonPinCircle,
+                            contentDescription = null, tint = trackingGold)
+                        Spacer(Modifier.width(8.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(visitor.name.ifBlank { visitor.username },
+                                color = trackingNavy,
+                                fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Text(visitor.username,
+                                color = trackingMuted, fontSize = 10.sp)
+                            Text(state,
+                                color = if (currentRoute?.status == "فعال")
+                                    Color(0xFF168552) else trackingMuted,
+                                fontSize = 11.sp)
+                            if (!visitor.active) Text("حساب غیرفعال",
+                                color = Color(0xFFB42318), fontSize = 10.sp)
+                        }
+                        if (currentRoute != null) {
+                            Button(
+                                onClick = {
+                                    selectedId = currentRoute.id
+                                    points = JSONArray()
+                                },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = trackingNavy
+                                ),
+                                contentPadding = PaddingValues(horizontal = 10.dp),
+                                shape = RoundedCornerShape(12.dp)
+                            ) { Text("مسیر", fontSize = 11.sp) }
+                        }
+                    }
+                }
             }
         }
         if (loading) LinearProgressIndicator(Modifier.fillMaxWidth(), color = trackingGold)
