@@ -1,0 +1,108 @@
+<!DOCTYPE html><html lang="fa" dir="rtl"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<style>
+html,body{margin:0;height:100%;font-family:sans-serif;background:#e8ede6}
+#map{position:absolute;inset:0;overflow:hidden;background:#e2e9e0;touch-action:none}
+#tiles,#routes{position:absolute;inset:0}
+#tiles img{position:absolute;width:256px;height:256px;user-select:none}
+#routes{pointer-events:none}
+#label{position:absolute;bottom:7px;left:7px;background:#fffdeef2;color:#172c44;font-size:10px;padding:5px 9px;border-radius:8px;direction:ltr}
+#controls{position:absolute;top:12px;left:12px;display:flex;flex-direction:column;gap:5px}
+#controls button{border:1px solid #e3b75c;background:white;color:#142747;font-size:22px;font-weight:bold;border-radius:9px;width:37px;height:37px;box-shadow:0 2px 6px #0002}
+#empty{position:absolute;top:42%;left:10%;width:80%;text-align:center;background:#ffffffe3;border-radius:10px;padding:8px;color:#36506e;font-size:13px}
+</style></head><body>
+<div id="map"><div id="tiles"></div><svg id="routes" xmlns="http://www.w3.org/2000/svg"></svg>
+<div id="empty">برای نمایش مسیر، ویزیتور و تاریخ را انتخاب کنید.</div>
+<div id="controls"><button onclick="zoomBy(1)" aria-label="بزرگ‌نمایی">+</button>
+<button onclick="zoomBy(-1)" aria-label="کوچک‌نمایی">−</button></div>
+<div id="label">© OpenStreetMap contributors</div></div>
+<script>
+(function(){
+"use strict";
+var map=document.getElementById('map'),tileLayer=document.getElementById('tiles'),
+svg=document.getElementById('routes'),empty=document.getElementById('empty');
+var route=[], zoom=13,center={x:0,y:0},dragging=false,lastPointer={x:0,y:0};
+var ns='http://www.w3.org/2000/svg';
+function mercator(lat,lng,z){
+ var scale=256*Math.pow(2,z);
+ var p=Math.max(-85.0511,Math.min(85.0511,lat))*Math.PI/180;
+ return {x:(lng+180)/360*scale,
+ y:(1-Math.log(Math.tan(p)+1/Math.cos(p))/Math.PI)/2*scale};
+}
+function svgNode(name,attrs) {
+ var element=document.createElementNS(ns,name);
+ for(var k in attrs) element.setAttribute(k,String(attrs[k]));
+ svg.appendChild(element);return element;
+}
+function draw(){
+ var w=map.clientWidth,h=map.clientHeight;
+ if(w<10||h<10)return;
+ tileLayer.textContent='';svg.textContent='';
+ svg.setAttribute('width',w);svg.setAttribute('height',h);
+ var scale=256*Math.pow(2,zoom);
+ var x0=center.x-w/2,y0=center.y-h/2;
+ var minX=Math.floor(x0/256),maxX=Math.floor((x0+w)/256);
+ var minY=Math.floor(y0/256),maxY=Math.floor((y0+h)/256);
+ for(var tx=minX;tx<=maxX;tx++) for(var ty=minY;ty<=maxY;ty++){
+    if(ty<0||ty>=Math.pow(2,zoom))continue;
+    var img=document.createElement('img');
+    var wrapX=((tx%Math.pow(2,zoom))+Math.pow(2,zoom))%Math.pow(2,zoom);
+    img.src='https://tile.openstreetmap.org/'+zoom+'/'+wrapX+'/'+ty+'.png';
+    img.alt='';img.draggable=false;img.referrerPolicy='no-referrer';
+    img.style.left=(tx*256-x0)+'px';img.style.top=(ty*256-y0)+'px';
+    tileLayer.appendChild(img);
+ }
+ var mapped=route.map(function(p){var m=mercator(p.lat,p.lng,zoom);
+   return {x:m.x-x0,y:m.y-y0};});
+ if(mapped.length>0){
+   var str=mapped.map(function(p){return p.x+','+p.y;}).join(' ');
+   svgNode('polyline',{points:str,fill:'none',stroke:'#ffffff',
+      'stroke-width':7,'stroke-linecap':'round','stroke-linejoin':'round'});
+   svgNode('polyline',{points:str,fill:'none',stroke:'#1764ba',
+      'stroke-width':4,'stroke-linecap':'round','stroke-linejoin':'round'});
+   var start=mapped[0],end=mapped[mapped.length-1];
+   svgNode('circle',{cx:start.x,cy:start.y,r:9,fill:'#12834e',stroke:'#fff','stroke-width':3});
+   svgNode('circle',{cx:end.x,cy:end.y,r:10,fill:'#d63842',stroke:'#fff','stroke-width':3});
+ }
+ empty.style.display=mapped.length?'none':'block';
+}
+function fit(){
+ var w=map.clientWidth,h=map.clientHeight;
+ if(route.length<1){center=mercator(29.4,54.5,zoom);draw();return;}
+ for(var z=17;z>=5;z--){
+   var pts=route.map(function(p){return mercator(p.lat,p.lng,z);});
+   var xs=pts.map(function(p){return p.x}),ys=pts.map(function(p){return p.y});
+   var minX=Math.min.apply(null,xs),maxX=Math.max.apply(null,xs);
+   var minY=Math.min.apply(null,ys),maxY=Math.max.apply(null,ys);
+   if((maxX-minX)<Math.max(100,w-70)&&(maxY-minY)<Math.max(100,h-70)){
+     zoom=z;center={x:(maxX+minX)/2,y:(maxY+minY)/2};draw();return;
+   }
+ }
+ zoom=5;center=mercator(route[0].lat,route[0].lng,zoom);draw();
+}
+window.setRoute=function(points){
+ route=Array.isArray(points)?points.filter(function(p){
+  return p&&Number.isFinite(p.lat)&&Number.isFinite(p.lng)&&
+   Math.abs(p.lat)<=90&&Math.abs(p.lng)<=180;
+ }):[];
+ fit();
+};
+window.zoomBy=function(d){
+ var z=Math.min(18,Math.max(4,zoom+d));
+ var scale=Math.pow(2,z-zoom);center.x*=scale;center.y*=scale;zoom=z;draw();
+};
+map.addEventListener('pointerdown',function(e){
+ if(e.target.tagName==='BUTTON')return;
+ dragging=true;lastPointer={x:e.clientX,y:e.clientY};
+ map.setPointerCapture(e.pointerId);
+});
+map.addEventListener('pointermove',function(e){
+ if(!dragging)return;
+ center.x-=e.clientX-lastPointer.x;center.y-=e.clientY-lastPointer.y;
+ lastPointer={x:e.clientX,y:e.clientY};draw();
+});
+map.addEventListener('pointerup',function(){dragging=false;});
+window.addEventListener('resize',draw);
+setTimeout(fit,100);
+})();
+</script></body></html>
