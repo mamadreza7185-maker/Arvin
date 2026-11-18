@@ -1,242 +1,129 @@
 package ir.arvin.app
 
 import android.Manifest
+import android.content.Context
+import android.content.pm.PackageManager
+import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import org.json.JSONObject
-import java.net.HttpURLConnection
-import java.net.URL
-import java.util.concurrent.Executors
+import android.graphics.Color as AndroidColor
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.compose.ui.text.font.FontWeight
-import android.content.Intent
-import android.content.pm.PackageManager
-import android.graphics.Bitmap
-import android.net.Uri
-import android.os.Bundle
-import android.view.ViewGroup
-import android.webkit.GeolocationPermissions
-import android.webkit.WebChromeClient
-import android.webkit.WebResourceError
-import android.webkit.WebResourceRequest
-import android.webkit.WebView
-import android.webkit.WebViewClient
-import android.webkit.CookieManager
-import android.widget.Toast
-import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.lightColorScheme
-import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
+import java.util.concurrent.Executors
 
-/**
- * Native Android UI and navigation shell.
- *
- * Existing attendance, sales, reports, and authentication still run in
- * the existing Google Apps Script application until an authenticated API
- * is provided. Do not duplicate or fake employee data in the Android UI.
- */
+/** Native login and a fully native, role-aware interface for Arvin Distribution. */
 class MainActivity : ComponentActivity() {
-    private lateinit var webView: WebView
-    private var isLoading by mutableStateOf(true)
-    private var pageError by mutableStateOf<String?>(null)
-    private var nativeLogin by mutableStateOf(true)
-    private var loginBusy by mutableStateOf(false)
-    private var loginMessage by mutableStateOf<String?>(null)
-    private var loggedInName by mutableStateOf<String?>(null)
-    private var sessionToken: String? = null
-    private val apiExecutor = Executors.newSingleThreadExecutor()
-    private var pendingGeoOrigin: String? = null
-    private var pendingGeoCallback: GeolocationPermissions.Callback? = null
-
     companion object {
-        private const val APP_URL =
-            "https://script.google.com/macros/s/AKfycbwAU8DUulyp17fRUnmZFIIJ_IoYJhWqZ14lmrpdVSYoq-GFFAzFaNLthXBHjOQwb9US/exec"
+        private const val APP_URL = "https://script.google.com/macros/s/AKfycbwAU8DUulyp17fRUnmZFIIJ_IoYJhWqZ14lmrpdVSYoq-GFFAzFaNLthXBHjOQwb9US/exec"
     }
 
-    private val locationPermissionLauncher = registerForActivityResult(
+    private val worker = Executors.newSingleThreadExecutor()
+    private val main = Handler(Looper.getMainLooper())
+    private var currentToken: String? = null
+    private var displayName by mutableStateOf<String?>(null)
+    private var userRole by mutableStateOf("")
+    private var userName by mutableStateOf("")
+    private var loginBusy by mutableStateOf(false)
+    private var loginMessage by mutableStateOf<String?>(null)
+    private var pendingLocation: ((JSONObject?, String?) -> Unit)? = null
+
+    private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) {
-        val granted = hasLocationPermission()
-        pendingGeoCallback?.invoke(pendingGeoOrigin, granted, false)
-        pendingGeoCallback = null
-        pendingGeoOrigin = null
-        if (!granted) {
-            Toast.makeText(
-                this,
-                "برای ثبت موقعیت مکانی، اجازه دسترسی لازم است.",
-                Toast.LENGTH_LONG
-            ).show()
+        val callback = pendingLocation
+        pendingLocation = null
+        if (hasLocationPermission()) {
+            if (callback != null) fetchLocation(callback)
+        } else {
+            callback?.invoke(null, "برای ثبت حضور، مسیر و گزارش، اجازه دسترسی به موقعیت مکانی لازم است.")
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.statusBarColor = android.graphics.Color.rgb(18, 34, 61)
-        window.navigationBarColor = android.graphics.Color.WHITE
-
-        CookieManager.getInstance().setAcceptCookie(true)
-        webView = WebView(this).apply {
-            CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
-            settings.javaScriptEnabled = true
-            settings.domStorageEnabled = true
-            settings.databaseEnabled = true
-            settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
-            settings.setGeolocationEnabled(true)
-            settings.allowFileAccess = false
-            settings.allowContentAccess = false
-            settings.javaScriptCanOpenWindowsAutomatically = false
-
-            webViewClient = object : WebViewClient() {
-                override fun shouldOverrideUrlLoading(
-                    view: WebView,
-                    request: WebResourceRequest
-                ): Boolean {
-                    val uri = request.url
-                    if (uri.scheme != "https") return true
-                    val host = uri.host.orEmpty().lowercase()
-                    val googleHost = host == "script.google.com" ||
-                        host == "accounts.google.com" ||
-                        host == "google.com" ||
-                        host.endsWith(".google.com") ||
-                        host == "googleusercontent.com" ||
-                        host.endsWith(".googleusercontent.com")
-                    if (googleHost) return false
-
-                    return try {
-                        startActivity(Intent(Intent.ACTION_VIEW, uri))
-                        true
-                    } catch (_: Exception) {
-                        true
-                    }
-                }
-
-                override fun onPageStarted(
-                    view: WebView,
-                    url: String?,
-                    favicon: Bitmap?
-                ) {
-                    isLoading = true
-                    pageError = null
-                }
-
-                override fun onPageFinished(view: WebView, url: String?) {
-                    isLoading = false
-                    // Some Android System WebView versions delay the first frame
-                    // until the user scrolls. Request a layout/paint after load.
-                    view.post {
-                        view.requestLayout()
-                        view.invalidate()
-                    }
-                    view.postDelayed({
-                        if (view.isAttachedToWindow) {
-                            view.evaluateJavascript(
-                                "(function(){requestAnimationFrame(function(){document.documentElement.getBoundingClientRect();document.body && document.body.getBoundingClientRect();});})();",
-                                null
-                            )
-                            view.requestLayout()
-                            view.invalidate()
-                        }
-                    }, 300)
-                }
-
-                override fun onReceivedError(
-                    view: WebView,
-                    request: WebResourceRequest,
-                    error: WebResourceError
-                ) {
-                    if (request.isForMainFrame) {
-                        isLoading = false
-                        pageError = "اتصال به سامانه برقرار نشد. اینترنت را بررسی و دوباره تلاش کنید."
-                    }
-                }
-            }
-
-            webChromeClient = object : WebChromeClient() {
-                override fun onGeolocationPermissionsShowPrompt(
-                    origin: String,
-                    callback: GeolocationPermissions.Callback
-                ) {
-                    val host = Uri.parse(origin).host.orEmpty().lowercase()
-                    val trusted = origin.startsWith("https://") &&
-                        (host == "script.google.com" ||
-                            host == "googleusercontent.com" ||
-                            host.endsWith(".googleusercontent.com"))
-                    if (!trusted) {
-                        callback.invoke(origin, false, false)
-                        return
-                    }
-                    if (hasLocationPermission()) {
-                        callback.invoke(origin, true, false)
-                    } else {
-                        pendingGeoOrigin = origin
-                        pendingGeoCallback = callback
-                        locationPermissionLauncher.launch(
-                            arrayOf(
-                                Manifest.permission.ACCESS_FINE_LOCATION,
-                                Manifest.permission.ACCESS_COARSE_LOCATION
-                            )
-                        )
-                    }
-                }
-            }
-        }
-
-        if (savedInstanceState == null) {
-            webView.loadUrl(APP_URL)
-        } else {
-            val restored = webView.restoreState(savedInstanceState)
-            if (restored == null) webView.loadUrl(APP_URL)
-        }
-
+        window.statusBarColor = AndroidColor.rgb(18, 36, 62)
+        window.navigationBarColor = AndroidColor.WHITE
         setContent {
-            MaterialTheme(
-                colorScheme = lightColorScheme(
-                    primary = Color(0xFF183456),
-                    secondary = Color(0xFFB48A4A),
-                    surface = Color.White,
-                    background = Color(0xFFF4F7FB)
-                )
-            ) {
-                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
-                    if (nativeLogin) {
+            MaterialTheme(colorScheme = lightColorScheme(
+                primary = Color(0xFF12243E),
+                secondary = Color(0xFFB88B4D),
+                background = Color(0xFFF4F7FB)
+            )) {
+                androidx.compose.runtime.CompositionLocalProvider(
+                    LocalLayoutDirection provides LayoutDirection.Rtl
+                ) {
+                    val logged = displayName
+                    if (logged == null) {
                         NativeLoginScreen(
                             busy = loginBusy,
                             message = loginMessage,
-                            loggedInName = loggedInName,
-                            onLogin = { username, password -> loginNative(username, password) },
-                            onLogout = { sessionToken = null; loggedInName = null; loginMessage = null },
-                            onBrowser = {
-                                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(APP_URL)))
-                            }
+                            onLogin = ::loginNative
                         )
-                    } else ArvinApp(
-                        webView = webView,
-                        loading = isLoading,
-                        webError = pageError,
-                        onReload = {
-                            pageError = null
-                            webView.reload()
-                        },
-                        hasLocationPermission = { hasLocationPermission() }
-                    )
+                    } else {
+                        ArvinNativeDashboard(
+                            name = logged,
+                            username = userName,
+                            role = userRole,
+                            onRequest = ::request,
+                            onLogout = ::logoutNative
+                        )
+                    }
                 }
             }
+        }
+    }
+
+    private fun postJson(payload: JSONObject, callback: (JSONObject) -> Unit) {
+        worker.execute {
+            var connection: HttpURLConnection? = null
+            val result = try {
+                connection = (URL(APP_URL).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    connectTimeout = 20000
+                    readTimeout = 30000
+                    doOutput = true
+                    instanceFollowRedirects = true
+                    setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                    setRequestProperty("Accept", "application/json")
+                }
+                connection.outputStream.use { output ->
+                    output.write(payload.toString().toByteArray(Charsets.UTF_8))
+                }
+                val stream = if (connection.responseCode in 200..299) {
+                    connection.inputStream
+                } else {
+                    connection.errorStream ?: connection.inputStream
+                }
+                val raw = stream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                JSONObject(raw)
+            } catch (_: Exception) {
+                JSONObject().put("ok", false).put(
+                    "message", "ارتباط با سامانه برقرار نشد. اینترنت یا انتشار Google Apps Script را بررسی کنید."
+                )
+            } finally {
+                connection?.disconnect()
+            }
+            main.post { if (!isFinishing && !isDestroyed) callback(result) }
         }
     }
 
@@ -244,81 +131,144 @@ class MainActivity : ComponentActivity() {
         if (loginBusy) return
         loginBusy = true
         loginMessage = null
-        apiExecutor.execute {
-            var connection: HttpURLConnection? = null
-            try {
-                connection = (URL(APP_URL).openConnection() as HttpURLConnection).apply {
-                    requestMethod = "POST"
-                    connectTimeout = 20000
-                    readTimeout = 25000
-                    doOutput = true
-                    instanceFollowRedirects = true
-                    setRequestProperty("Content-Type", "application/json; charset=utf-8")
-                }
-                val body = JSONObject().put("action", "login").put("username", username.trim())
-                    .put("password", password).toString()
-                connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
-                val raw = connection.inputStream.bufferedReader().use { it.readText() }
-                val response = JSONObject(raw)
-                Handler(Looper.getMainLooper()).post {
-                    loginBusy = false
-                    if (response.optBoolean("ok")) {
-                        sessionToken = response.optString("token")
-                        loggedInName = response.optJSONObject("user")?.optString("name") ?: username
-                        loginMessage = "ورود موفق بود. اتصال امکانات به نسخه بومی در حال تکمیل است."
-                    } else loginMessage = response.optString("message", "ورود ناموفق بود.")
-                }
-            } catch (e: Exception) {
-                Handler(Looper.getMainLooper()).post {
-                    loginBusy = false
-                    loginMessage = "ارتباط با API برقرار نشد. اتصال اینترنت و نسخه انتشار را بررسی کنید."
-                }
-            } finally { connection?.disconnect() }
+        val body = JSONObject().put("action", "login")
+            .put("username", username.trim()).put("password", password)
+        postJson(body) { result ->
+            loginBusy = false
+            if (result.optBoolean("ok") && result.optString("token").isNotEmpty()) {
+                val user = result.optJSONObject("user")
+                currentToken = result.optString("token")
+                userName = user?.optString("username", username.trim()) ?: username.trim()
+                userRole = user?.optString("role", "warehouse") ?: "warehouse"
+                displayName = user?.optString("name", userName) ?: userName
+                loginMessage = null
+            } else {
+                loginMessage = result.optString("message", "ورود ناموفق بود.")
+            }
         }
     }
 
-    override fun onResume() {
-        super.onResume()
-        if (::webView.isInitialized) {
-            webView.post {
-                webView.requestLayout()
-                webView.invalidate()
+    /** Calls the existing secure Apps Script API, never putting tokens in URL parameters. */
+    private fun request(
+        action: String,
+        data: JSONObject,
+        requireGps: Boolean,
+        callback: (JSONObject) -> Unit
+    ) {
+        val token = currentToken
+        if (token.isNullOrBlank()) {
+            callback(JSONObject().put("ok", false).put("message", "نشست تمام شده؛ دوباره وارد شوید."))
+            return
+        }
+        val send = { form: JSONObject ->
+            postJson(
+                JSONObject().put("action", action).put("token", token).put("data", form),
+                callback
+            )
+        }
+        if (requireGps) {
+            fetchLocation { location, error ->
+                if (location != null) {
+                    data.put("location", location)
+                    send(data)
+                } else {
+                    callback(JSONObject().put("ok", false).put(
+                        "message", error ?: "موقعیت مکانی به دست نیامد."
+                    ))
+                }
             }
+        } else {
+            send(data)
         }
     }
 
     private fun hasLocationPermission(): Boolean =
         checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) ==
             PackageManager.PERMISSION_GRANTED ||
-            checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) ==
+        checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) ==
             PackageManager.PERMISSION_GRANTED
 
-    override fun onSaveInstanceState(outState: Bundle) {
-        if (::webView.isInitialized) webView.saveState(outState)
-        super.onSaveInstanceState(outState)
+    private fun fetchLocation(callback: (JSONObject?, String?) -> Unit) {
+        if (!hasLocationPermission()) {
+            pendingLocation = callback
+            permissionLauncher.launch(arrayOf(
+                Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.ACCESS_COARSE_LOCATION
+            ))
+            return
+        }
+        val locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        try {
+            val provider = when {
+                locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) ->
+                    LocationManager.GPS_PROVIDER
+                locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER) ->
+                    LocationManager.NETWORK_PROVIDER
+                else -> null
+            }
+            if (provider == null) {
+                callback(null, "موقعیت مکانی گوشی را روشن کنید.")
+                return
+            }
+            var completed = false
+            fun finish(location: Location?, error: String?) {
+                if (completed) return
+                completed = true
+                if (location != null) {
+                    callback(JSONObject()
+                        .put("lat", location.latitude)
+                        .put("lng", location.longitude)
+                        .put("accuracy", location.accuracy.toDouble()), null)
+                } else callback(null, error)
+            }
+            val listener = object : LocationListener {
+                override fun onLocationChanged(location: Location) {
+                    locationManager.removeUpdates(this)
+                    finish(location, null)
+                }
+                override fun onProviderEnabled(provider: String) {}
+                override fun onProviderDisabled(provider: String) {}
+                @Deprecated("Legacy Android")
+                override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
+            }
+            locationManager.requestSingleUpdate(provider, listener, Looper.getMainLooper())
+            main.postDelayed({
+                if (!completed) {
+                    locationManager.removeUpdates(listener)
+                    finish(null, "دریافت GPS بیش از حد طول کشید. در فضای باز دوباره تلاش کنید.")
+                }
+            }, 25000)
+        } catch (_: SecurityException) {
+            callback(null, "مجوز موقعیت مکانی صادر نشده است.")
+        } catch (_: Exception) {
+            callback(null, "موقعیت مکانی در دسترس نیست.")
+        }
+    }
+
+    private fun logoutNative() {
+        val token = currentToken
+        currentToken = null
+        displayName = null
+        userName = ""
+        userRole = ""
+        loginMessage = null
+        if (!token.isNullOrBlank()) {
+            postJson(JSONObject().put("action", "logout").put("token", token)) {}
+        }
     }
 
     override fun onDestroy() {
-        pendingGeoCallback?.invoke(pendingGeoOrigin, false, false)
-        pendingGeoCallback = null
-        if (::webView.isInitialized) {
-            (webView.parent as? ViewGroup)?.removeView(webView)
-            webView.destroy()
-        }
-        apiExecutor.shutdownNow()
+        pendingLocation = null
+        worker.shutdownNow()
         super.onDestroy()
     }
 }
 
-
-@androidx.compose.runtime.Composable
+@Composable
 private fun NativeLoginScreen(
     busy: Boolean,
     message: String?,
-    loggedInName: String?,
-    onLogin: (String, String) -> Unit,
-    onLogout: () -> Unit,
-    onBrowser: () -> Unit
+    onLogin: (String, String) -> Unit
 ) {
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
@@ -327,31 +277,33 @@ private fun NativeLoginScreen(
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text("پخش آروین", fontSize = 27.sp, fontWeight = FontWeight.Bold,
+        Text("پخش آروین", fontSize = 30.sp, fontWeight = FontWeight.Bold,
             color = Color(0xFF12243E))
         Spacer(Modifier.height(8.dp))
-        Text("ورود امن به سامانه کارکنان", color = Color(0xFF64748B))
-        Spacer(Modifier.height(26.dp))
-        if (loggedInName == null) {
-            OutlinedTextField(value = username, onValueChange = { username = it },
-                label = { Text("نام کاربری") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            Spacer(Modifier.height(12.dp))
-            OutlinedTextField(value = password, onValueChange = { password = it },
-                label = { Text("رمز عبور") }, singleLine = true,
-                visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
-            Spacer(Modifier.height(20.dp))
-            Button(onClick = { onLogin(username, password) }, enabled = !busy && username.isNotBlank() && password.isNotBlank(),
-                modifier = Modifier.fillMaxWidth()) { Text(if (busy) "در حال بررسی..." else "ورود") }
-        } else {
-            Text("خوش آمدید، $loggedInName", fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(12.dp))
-            TextButton(onClick = onLogout) { Text("خروج از حساب") }
+        Text("سامانه حضور و غیاب و مدیریت کارکنان", color = Color(0xFF64748B))
+        Spacer(Modifier.height(28.dp))
+        OutlinedTextField(value = username, onValueChange = { username = it },
+            label = { Text("نام کاربری") }, singleLine = true,
+            modifier = Modifier.fillMaxWidth())
+        Spacer(Modifier.height(12.dp))
+        OutlinedTextField(value = password, onValueChange = { password = it },
+            label = { Text("رمز عبور") }, singleLine = true,
+            visualTransformation = PasswordVisualTransformation(),
+            modifier = Modifier.fillMaxWidth())
+        Spacer(Modifier.height(20.dp))
+        Button(
+            onClick = { onLogin(username, password) },
+            enabled = !busy && username.isNotBlank() && password.isNotBlank(),
+            modifier = Modifier.fillMaxWidth().height(50.dp)
+        ) {
+            Text(if (busy) "در حال ورود..." else "ورود به برنامه")
         }
         if (message != null) {
             Spacer(Modifier.height(14.dp))
-            Text(message, color = Color(0xFF45546C))
+            Text(message, color = Color(0xFFB42318))
         }
         Spacer(Modifier.height(20.dp))
-        TextButton(onClick = onBrowser) { Text("ورود از طریق مرورگر (نسخه فعلی)") }
+        Text("نسخه بومی اندروید • پخش مواد غذایی، بهداشتی و شوینده",
+            color = Color(0xFF64748B), fontSize = 11.sp)
     }
 }
