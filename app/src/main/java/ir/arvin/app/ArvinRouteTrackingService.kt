@@ -106,7 +106,13 @@ class ArvinRouteTrackingService : Service(), LocationListener {
         trackingToken = secret
         startedAt = System.currentTimeMillis()
         finishing = false
-        prefs.edit().putString("sessionId", id).putString("queue", "[]").apply()
+        prefs.edit()
+            .putString("sessionId", id)
+            .putString("queue", "[]")
+            .putLong("lastGps", 0L)
+            .putLong("lastUpload", 0L)
+            .remove("lastError")
+            .apply()
         try {
             val notification = buildNotification("ثبت مسیر فعال است؛ GPS تا پایان مسیر روشن می‌ماند")
             if (Build.VERSION.SDK_INT >= 29) {
@@ -150,6 +156,8 @@ class ArvinRouteTrackingService : Service(), LocationListener {
                 main.postDelayed(::tick, 30000L)
             }
         } catch (_: Exception) {
+            prefs.edit().putString("lastError",
+                "سرویس GPS اجرا نشد؛ مجوز موقعیت یا تنظیمات باتری گوشی را بررسی کنید.").apply()
             stopCollecting()
             finishing = true
             // Exit cleanly if Android rejects the foreground service start.
@@ -174,7 +182,10 @@ class ArvinRouteTrackingService : Service(), LocationListener {
         synchronized(queueLock) {
             val old = JSONArray(prefs.getString("queue", "[]") ?: "[]")
             old.put(point)
-            prefs.edit().putString("queue", old.toString()).apply()
+            prefs.edit()
+                .putString("queue", old.toString())
+                .putLong("lastGps", now)
+                .apply()
         }
         flush()
     }
@@ -213,7 +224,13 @@ class ArvinRouteTrackingService : Service(), LocationListener {
                         .put("sessionId", sessionId)
                         .put("trackingToken", trackingToken)
                         .put("points", batch))
-                    if (!response.optBoolean("ok")) return@execute
+                    if (!response.optBoolean("ok")) {
+                        prefs.edit().putString("lastError",
+                            response.optString("message", "ارسال نقاط ناموفق بود.")).apply()
+                        return@execute
+                    }
+                    prefs.edit().putLong("lastUpload", System.currentTimeMillis())
+                        .remove("lastError").apply()
                     synchronized(queueLock) {
                         val all = JSONArray(prefs.getString("queue", "[]") ?: "[]")
                         val left = JSONArray()
@@ -230,11 +247,19 @@ class ArvinRouteTrackingService : Service(), LocationListener {
                             .put("sessionId", sessionId)
                             .put("trackingToken", trackingToken))
                         if (stopped.optBoolean("ok")) {
+                            prefs.edit().putLong("lastUpload", System.currentTimeMillis())
+                                .remove("lastError").apply()
                             main.post { stopSelf() }
+                        } else {
+                            prefs.edit().putString("lastError",
+                                stopped.optString("message", "ثبت پایان مسیر ناموفق بود.")).apply()
                         }
                     }
                 }
             } catch (_: Exception) {
+                prefs.edit().putString("lastError",
+                    "ارتباط با سرور ردیابی برقرار نشد؛ بعد از اتصال اینترنت دوباره تلاش می‌شود.")
+                    .apply()
                 // Preserve pending points. Next tick retries when internet returns.
             } finally {
                 main.post { uploading = false }
