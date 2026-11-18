@@ -12,7 +12,14 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
+import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.delay
+import android.content.Context
+import org.json.JSONArray
+import java.util.Date
+import java.text.SimpleDateFormat
+import java.util.Locale
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -437,9 +444,55 @@ private fun ModernRouteSection(
     send: (String, JSONObject, Boolean) -> Unit,
     lastRoute: String?
 ) {
+    val ctx = LocalContext.current
+    var statusTick by remember { mutableIntStateOf(0) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(10000L)
+            statusTick++
+        }
+    }
+    val gpsPrefs = remember(statusTick) {
+        ctx.getSharedPreferences("arvin_tracking_queue_v16", Context.MODE_PRIVATE)
+    }
+    val trackingActive = gpsPrefs.getBoolean("active", false)
+    val lastFix = gpsPrefs.getLong("lastGps", 0L)
+    val lastUploaded = gpsPrefs.getLong("lastUpload", 0L)
+    val trackingError = gpsPrefs.getString("lastError", "").orEmpty()
+    val pendingCount = try {
+        JSONArray(gpsPrefs.getString("queue", "[]") ?: "[]").length()
+    } catch (_: Exception) { 0 }
+    val clock = SimpleDateFormat("HH:mm:ss", Locale.US)
     ModernPanel {
         ModernSectionHeader("مسیر ویزیتور",
-            "ثبت شروع و پایان مسیر با GPS", Icons.Filled.Route)
+            "ثبت مسیر زنده با GPS و اعلان فعال", Icons.Filled.Route)
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            color = if (trackingActive) Color(0xFFE8F6EC) else Color(0xFFF2F3F6),
+            shape = RoundedCornerShape(14.dp)
+        ) {
+            Column(Modifier.padding(11.dp),
+                verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                Text(if (trackingActive) "● GPS مسیر فعال است"
+                    else "● GPS مسیر روی این گوشی فعال نیست",
+                    color = if (trackingActive) Color(0xFF177642) else modernGray,
+                    fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                if (lastFix > 0L) Text(
+                    "آخرین موقعیت دریافت‌شده: " + clock.format(Date(lastFix)),
+                    color = modernBlue, fontSize = 11.sp)
+                if (lastUploaded > 0L) Text(
+                    "آخرین ارسال موفق به سرور: " + clock.format(Date(lastUploaded)),
+                    color = modernBlue, fontSize = 11.sp)
+                if (pendingCount > 0) Text(
+                    "$pendingCount نقطه در انتظار ارسال به سرور",
+                    color = Color(0xFFA46C13), fontSize = 11.sp)
+                if (trackingError.isNotBlank()) Text(
+                    trackingError, color = Color(0xFFB42318), fontSize = 11.sp)
+                if (!trackingActive && lastRoute != "پایان مسیر") Text(
+                    "برای آغاز ردیابی، «شروع مسیر» را بزنید و فعال‌شدن اعلان GPS را بررسی کنید.",
+                    color = modernGray, fontSize = 11.sp)
+            }
+        }
         Row(Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Button(
@@ -498,7 +551,7 @@ fun ModernRoute(
                 "حریم خصوصی مسیر", "ثبت موقعیت فقط هنگام عملیات",
                 Icons.Filled.Security
             )
-            Text("مسیر ویزیتور در پس‌زمینه ردیابی نمی‌شود. فقط هنگام شروع یا پایان مسیر، GPS در Google Sheets ثبت می‌شود.",
+            Text("GPS فقط پس از زدن «شروع مسیر» و تا زمان «پایان مسیر» یا توقف از اعلان گوشی فعال است. در این مدت با اعلان قابل مشاهده، موقعیت‌های مسیر در پس‌زمینه نیز ثبت می‌شوند.",
                 color = modernGray, fontSize = 12.sp)
         }
     }
