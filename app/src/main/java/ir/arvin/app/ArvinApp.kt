@@ -1,6 +1,8 @@
 package ir.arvin.app
 
 import android.webkit.WebView
+import android.content.Intent
+import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -44,6 +46,11 @@ fun ArvinApp(
     hasLocationPermission: () -> Boolean
 ) {
     var tab by remember { mutableStateOf(Tab.HOME) }
+    val context = LocalContext.current
+    var webMountedOnce by remember { mutableStateOf(false) }
+    val openInChrome = {
+        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(webView.url ?: "https://script.google.com/macros/s/AKfycbwAU8DUulyp17fRUnmZFIIJ_IoYJhWqZ14lmrpdVSYoq-GFFAzFaNLthXBHjOQwb9US/exec")))
+    }
     BackHandler(enabled = tab != Tab.HOME || (tab == Tab.SERVICES && webView.canGoBack())) {
         if (tab == Tab.SERVICES && webView.canGoBack()) webView.goBack()
         else tab = Tab.HOME
@@ -89,6 +96,10 @@ fun ArvinApp(
             if (tab == Tab.SERVICES) {
                 Column(Modifier.fillMaxSize()) {
                     if (loading) LinearProgressIndicator(Modifier.fillMaxWidth(), color = gold)
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(onClick = onReload) { Text("بارگذاری دوباره") }
+                        TextButton(onClick = openInChrome) { Text("باز کردن در مرورگر") }
+                    }
                     if (webError != null) {
                         Column(
                             Modifier.fillMaxWidth().padding(20.dp),
@@ -103,6 +114,12 @@ fun ArvinApp(
                         factory = {
                             (webView.parent as? android.view.ViewGroup)?.removeView(webView)
                             webView
+                        },
+                        update = { view ->
+                            if (!webMountedOnce) {
+                                webMountedOnce = true
+                                view.post { view.reload() }
+                            }
                         },
                         modifier = Modifier.fillMaxSize()
                     )
