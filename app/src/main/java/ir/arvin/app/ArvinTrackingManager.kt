@@ -51,9 +51,11 @@ private data class TrackingSessionItem(
 
 private fun showTehranTime(iso: String): String {
     return try {
-        val millis = java.time.Instant.parse(iso).toEpochMilli()
+        val parsed = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US)
+            .apply { timeZone = TimeZone.getTimeZone("UTC") }
+            .parse(iso) ?: return "—"
         SimpleDateFormat("HH:mm", Locale.US).apply { timeZone = tehran }
-            .format(Date(millis))
+            .format(parsed)
     } catch (_: Exception) { "—" }
 }
 
