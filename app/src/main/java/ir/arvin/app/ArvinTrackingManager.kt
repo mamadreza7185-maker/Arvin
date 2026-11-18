@@ -76,9 +76,15 @@ fun ArvinTrackingManager(
     var loadingPath by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
     var truncated by remember { mutableStateOf(false) }
+    var refreshTick by remember { mutableIntStateOf(0) }
+    var serverConnected by remember { mutableStateOf<Boolean?>(null) }
+    var lastChecked by remember { mutableStateOf("") }
+    var summaryError by remember { mutableStateOf<String?>(null) }
 
     // Summary refresh is active only while the manager's tracking tab is on-screen.
-    LaunchedEffect(day) {
+    LaunchedEffect(day, refreshTick) {
+        serverConnected = null
+        summaryError = null
         sessions = emptyList()
         selectedId = ""
         points = JSONArray()
@@ -106,9 +112,23 @@ fun ArvinTrackingManager(
                         selectedId = ""
                         points = JSONArray()
                     }
+                    serverConnected = true
+                    summaryError = null
+                    lastChecked = SimpleDateFormat("HH:mm:ss", Locale.US)
+                        .format(Date())
                     message = null
                 } else {
-                    message = result.optString("message", "اطلاعات ردیابی دریافت نشد.")
+                    serverConnected = false
+                    val raw = result.optString("message", "اطلاعات ردیابی دریافت نشد.")
+                    summaryError = if (raw.contains("پشتیبانی نمی") ||
+                        raw.contains("not support", ignoreCase = true) ||
+                        raw.contains("unsupported", ignoreCase = true))
+                        "نسخه ردیابی روی سرور منتشر نشده است. فایل سرور GPS را در Google Apps Script ذخیره کرده و نسخه جدید همان استقرار را Deploy کنید."
+                    else if (raw.contains("نشست") || raw.contains("ورود"))
+                        "نشست مدیر منقضی شده است؛ از برنامه خارج شوید و دوباره وارد شوید."
+                    else "دریافت مسیرها از سرور ناموفق بود: " + raw
+                    lastChecked = SimpleDateFormat("HH:mm:ss", Locale.US)
+                        .format(Date())
                 }
             }
             delay(60000L)
@@ -172,16 +192,65 @@ fun ArvinTrackingManager(
             }
             Text("تاریخ بر اساس ساعت ایران است.", color = trackingMuted, fontSize = 11.sp)
         }
+        ModernPanel {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    when (serverConnected) {
+                        true -> Icons.Filled.CloudDone
+                        false -> Icons.Filled.CloudOff
+                        null -> Icons.Filled.CloudSync
+                    },
+                    contentDescription = null,
+                    tint = when (serverConnected) {
+                        true -> Color(0xFF168552)
+                        false -> Color(0xFFB42318)
+                        null -> trackingMuted
+                    },
+                    modifier = Modifier.size(24.dp)
+                )
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        when (serverConnected) {
+                            true -> "ارتباط با سامانه ردیابی برقرار است."
+                            false -> "دریافت اطلاعات ردیابی ناموفق بود."
+                            null -> "در حال بررسی ارتباط با سرور..."
+                        },
+                        color = trackingNavy, fontWeight = FontWeight.Bold, fontSize = 12.sp
+                    )
+                    if (lastChecked.isNotBlank()) {
+                        Text("آخرین بررسی: $lastChecked",
+                            fontSize = 11.sp, color = trackingMuted)
+                    }
+                }
+            }
+            OutlinedButton(
+                enabled = !loading,
+                onClick = { refreshTick++ },
+                modifier = Modifier.fillMaxWidth(),
+                border = BorderStroke(1.dp, trackingGold)
+            ) {
+                Icon(Icons.Filled.Refresh, contentDescription = null)
+                Spacer(Modifier.width(6.dp))
+                Text("بررسی اتصال و تازه‌سازی مسیرها")
+            }
+            if (summaryError != null) {
+                Text(summaryError.orEmpty(), color = Color(0xFFB42318),
+                    fontSize = 12.sp)
+            }
+        }
         if (loading) LinearProgressIndicator(Modifier.fillMaxWidth(), color = trackingGold)
-        if (!message.isNullOrBlank()) {
+        if (message != null && serverConnected == true) {
             Text(message.orEmpty(), color = Color(0xFFB42318), fontSize = 12.sp)
         }
-        if (sessions.isEmpty() && !loading) {
+        if (sessions.isEmpty() && !loading && serverConnected == true) {
             ModernPanel {
-                Text("برای این تاریخ، هنوز مسیر ثبت‌شده‌ای وجود ندارد.",
+                Text("اتصال با سرور برقرار است، اما برای این تاریخ مسیر GPS جدید ثبت نشده است.",
                     color = trackingMuted, fontSize = 13.sp)
+                Text("در گوشی ویزیتور نسخه ۱.۶ یا جدیدتر را نصب کنید، «شروع مسیر» بزنید و اعلان فعال ردیابی را بررسی کنید. اگر اطلاعات در TrackingSessions وجود دارد، تاریخ نمایش را کنترل کنید.",
+                    color = trackingMuted, fontSize = 11.sp)
             }
-        } else {
+        } else if (sessions.isNotEmpty()) {
             Text("ویزیتورها و مسیرهای روز انتخاب‌شده", color = trackingNavy,
                 fontWeight = FontWeight.Bold, fontSize = 14.sp)
         }
