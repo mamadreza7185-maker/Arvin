@@ -137,6 +137,22 @@ class MainActivity : ComponentActivity() {
 
                 override fun onPageFinished(view: WebView, url: String?) {
                     isLoading = false
+                    // Some Android System WebView versions delay the first frame
+                    // until the user scrolls. Request a layout/paint after load.
+                    view.post {
+                        view.requestLayout()
+                        view.invalidate()
+                    }
+                    view.postDelayed({
+                        if (view.isAttachedToWindow) {
+                            view.evaluateJavascript(
+                                "(function(){requestAnimationFrame(function(){document.documentElement.getBoundingClientRect();document.body && document.body.getBoundingClientRect();});})();",
+                                null
+                            )
+                            view.requestLayout()
+                            view.invalidate()
+                        }
+                    }, 300)
                 }
 
                 override fun onReceivedError(
@@ -258,6 +274,16 @@ class MainActivity : ComponentActivity() {
                     loginMessage = "ارتباط با API برقرار نشد. اتصال اینترنت و نسخه انتشار را بررسی کنید."
                 }
             } finally { connection?.disconnect() }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (::webView.isInitialized) {
+            webView.post {
+                webView.requestLayout()
+                webView.invalidate()
+            }
         }
     }
 
