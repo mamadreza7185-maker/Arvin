@@ -10,7 +10,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.graphics.Color as AndroidColor
-import androidx.activity.ComponentActivity
+import androidx.fragment.app.FragmentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
@@ -32,7 +32,7 @@ import java.net.URL
 import java.util.concurrent.Executors
 
 /** Native login and a fully native, role-aware interface for Arvin Distribution. */
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
     companion object {
         private const val APP_URL = "https://script.google.com/macros/s/AKfycbwAU8DUulyp17fRUnmZFIIJ_IoYJhWqZ14lmrpdVSYoq-GFFAzFaNLthXBHjOQwb9US/exec"
     }
@@ -46,6 +46,11 @@ class MainActivity : ComponentActivity() {
     private var loginBusy by mutableStateOf(false)
     private var loginMessage by mutableStateOf<String?>(null)
     private var pendingLocation: ((JSONObject?, String?) -> Unit)? = null
+    private lateinit var vault: ArvinBiometricVault
+    private var savedLoginName by mutableStateOf("")
+    private var rememberName by mutableStateOf(false)
+    private var biometricsReady by mutableStateOf(false)
+    private var biometricsSupported by mutableStateOf(false)
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -61,6 +66,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        vault = ArvinBiometricVault(this)
+        savedLoginName = vault.rememberedUsername()
+        rememberName = vault.rememberedUsernameEnabled()
+        biometricsReady = vault.hasBiometricCredentials()
+        biometricsSupported = vault.biometricAvailable()
         window.statusBarColor = AndroidColor.rgb(18, 36, 62)
         window.navigationBarColor = AndroidColor.rgb(18, 36, 62)
         setContent {
@@ -77,7 +87,14 @@ class MainActivity : ComponentActivity() {
                         NativeLoginScreen(
                             busy = loginBusy,
                             message = loginMessage,
-                            onLogin = ::loginNative
+                            savedUsername = savedLoginName,
+                            rememberName = rememberName,
+                            canUseBiometrics = biometricsSupported,
+                            hasBiometricLogin = biometricsReady,
+                            biometricUsername = vault.biometricUsername(),
+                            onLogin = ::loginNative,
+                            onBiometricLogin = ::loginWithBiometrics,
+                            onForgetLogin = ::forgetSavedLogin
                         )
                     } else {
                         ArvinNativeDashboard(
@@ -127,25 +144,73 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun loginNative(username: String, password: String) {
+    private fun loginNative(
+        username: String, password: String,
+        saveName: Boolean, enableBiometrics: Boolean
+    ) {
         if (loginBusy) return
         loginBusy = true
         loginMessage = null
+        val cleanName = username.trim()
         val body = JSONObject().put("action", "login")
-            .put("username", username.trim()).put("password", password)
+            .put("username", cleanName).put("password", password)
         postJson(body) { result ->
-            loginBusy = false
             if (result.optBoolean("ok") && result.optString("token").isNotEmpty()) {
-                val user = result.optJSONObject("user")
-                currentToken = result.optString("token")
-                userName = user?.optString("username", username.trim()) ?: username.trim()
-                userRole = user?.optString("role", "warehouse") ?: "warehouse"
-                displayName = user?.optString("name", userName) ?: userName
-                loginMessage = null
+                vault.saveRememberUsername(cleanName, saveName || enableBiometrics)
+                savedLoginName = vault.rememberedUsername()
+                rememberName = vault.rememberedUsernameEnabled()
+                if (enableBiometrics && biometricsSupported) {
+                    vault.enable(cleanName, password) { saved, reason ->
+                        biometricsReady = vault.hasBiometricCredentials()
+                        if (!saved && reason != null) {
+                            android.widget.Toast.makeText(
+                                this, reason, android.widget.Toast.LENGTH_LONG
+                            ).show()
+                        }
+                        finishLogin(result, cleanName)
+                    }
+                } else {
+                    finishLogin(result, cleanName)
+                }
             } else {
+                loginBusy = false
                 loginMessage = result.optString("message", "ورود ناموفق بود.")
             }
         }
+    }
+
+    private fun finishLogin(result: JSONObject, fallbackUsername: String) {
+        loginBusy = false
+        val user = result.optJSONObject("user")
+        currentToken = result.optString("token")
+        userName = user?.optString("username", fallbackUsername) ?: fallbackUsername
+        userRole = user?.optString("role", "warehouse") ?: "warehouse"
+        displayName = user?.optString("name", userName) ?: userName
+        loginMessage = null
+    }
+
+    private fun loginWithBiometrics() {
+        if (loginBusy) return
+        loginMessage = null
+        vault.login(
+            onUnlocked = { username, password ->
+                // Biometric authentication only releases an encrypted secret;
+                // the live Apps Script account must still accept these credentials.
+                loginNative(username, password, true, false)
+            },
+            onFailure = { why ->
+                biometricsReady = vault.hasBiometricCredentials()
+                loginMessage = why
+            }
+        )
+    }
+
+    private fun forgetSavedLogin() {
+        vault.forgetAll()
+        savedLoginName = ""
+        rememberName = false
+        biometricsReady = false
+        loginMessage = "اطلاعات ورود ذخیره‌شده از گوشی پاک شد."
     }
 
     /** Calls the existing secure Apps Script API, never putting tokens in URL parameters. */
